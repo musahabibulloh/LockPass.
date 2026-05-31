@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import CryptoJS from 'crypto-js';
+import { supabase } from './supabase';
 import { 
   Shield, 
   ShieldAlert, 
@@ -71,6 +72,9 @@ export default function App() {
   const [failedAttempts, setFailedAttempts] = useState(0);
   const [lockoutTimeLeft, setLockoutTimeLeft] = useState(0); // in seconds
 
+  // Supabase Cloud Sync Status State
+  const [cloudSyncStatus, setCloudSyncStatus] = useState('offline'); // 'offline' | 'checking' | 'synced' | 'syncing' | 'error'
+
   // Password Generator State
   const [genLength, setGenLength] = useState(16);
   const [genOptions, setGenOptions] = useState({
@@ -86,16 +90,78 @@ export default function App() {
   const pinInputRef = useRef(null);
   const inactivityTimerRef = useRef(null);
 
-  // Initialize and check if a PIN has been set
+  // Initialize and synchronize with Supabase Cloud or local fallback
   useEffect(() => {
-    const verifyToken = localStorage.getItem('lockpass_verify');
-    if (verifyToken) {
-      setHasMasterPinSet(true);
-    } else {
-      setHasMasterPinSet(false);
-    }
+    const initSync = async () => {
+      if (!supabase) {
+        // Local-only mode
+        setCloudSyncStatus('offline');
+        const verifyToken = localStorage.getItem('lockpass_verify');
+        setHasMasterPinSet(!!verifyToken);
+        return;
+      }
 
-    // Check for existing Lockout on page load
+      setCloudSyncStatus('checking');
+      try {
+        const { data, error } = await supabase.from('lockpass_store').select('*');
+        
+        if (error) {
+          console.error("Supabase load error:", error);
+          setCloudSyncStatus('error');
+          // Fallback to local storage if DB call fails (e.g. table not created yet)
+          const verifyToken = localStorage.getItem('lockpass_verify');
+          setHasMasterPinSet(!!verifyToken);
+          return;
+        }
+
+        const verifyRow = data.find(r => r.key === 'lockpass_verify');
+        const dataRow = data.find(r => r.key === 'lockpass_encrypted_data');
+
+        if (verifyRow) {
+          // Cloud data exists, sync to local storage to enable offline fallback
+          localStorage.setItem('lockpass_verify', verifyRow.value);
+          if (dataRow) {
+            localStorage.setItem('lockpass_encrypted_data', dataRow.value);
+          }
+          setHasMasterPinSet(true);
+          setCloudSyncStatus('synced');
+        } else {
+          // No data in cloud, check local storage for existing vault
+          const localVerify = localStorage.getItem('lockpass_verify');
+          if (localVerify) {
+            const localData = localStorage.getItem('lockpass_encrypted_data') || '';
+            
+            // Push existing local vault up to Supabase to initialize cloud backup
+            setCloudSyncStatus('syncing');
+            const { error: upsertError } = await supabase.from('lockpass_store').upsert([
+              { key: 'lockpass_verify', value: localVerify },
+              { key: 'lockpass_encrypted_data', value: localData }
+            ]);
+
+            if (upsertError) {
+              setCloudSyncStatus('error');
+            } else {
+              setCloudSyncStatus('synced');
+            }
+            setHasMasterPinSet(true);
+          } else {
+            // First time setup anywhere
+            setHasMasterPinSet(false);
+            setCloudSyncStatus('synced');
+          }
+        }
+      } catch (err) {
+        console.error("Cloud synchronization error:", err);
+        setCloudSyncStatus('error');
+        // Fallback to local storage
+        const verifyToken = localStorage.getItem('lockpass_verify');
+        setHasMasterPinSet(!!verifyToken);
+      }
+    };
+
+    initSync();
+
+    // Check for existing Lockout timer
     const lockoutUntil = localStorage.getItem('lockpass_lockout_until');
     if (lockoutUntil) {
       const remaining = Math.ceil((parseInt(lockoutUntil) - Date.now()) / 1000);
@@ -161,7 +227,7 @@ export default function App() {
     };
   }, [isLocked]);
 
-  // Auto-focus PIN field when locked screen is visible and not locked out
+  // Auto-focus PIN field
   useEffect(() => {
     if (isLocked && hasMasterPinSet && pinInputRef.current && lockoutTimeLeft <= 0) {
       setTimeout(() => {
@@ -170,7 +236,29 @@ export default function App() {
     }
   }, [isLocked, hasMasterPinSet, lockoutTimeLeft]);
 
-  // Sync state to local storage when passwords list changes
+  // Save updates to Cloud Database
+  const saveToCloud = async (keyName, valueString) => {
+    if (!supabase) return;
+    setCloudSyncStatus('syncing');
+    try {
+      const { error } = await supabase
+        .from('lockpass_store')
+        .upsert({ key: keyName, value: valueString });
+      
+      if (error) {
+        console.error("Cloud save error:", error);
+        setCloudSyncStatus('error');
+        showToast('warning', 'Gagal menyelaraskan data ke cloud. Disimpan secara lokal.');
+      } else {
+        setCloudSyncStatus('synced');
+      }
+    } catch (err) {
+      console.error("Cloud save exception:", err);
+      setCloudSyncStatus('error');
+    }
+  };
+
+  // Sync state to local storage and Supabase
   const saveVaultToLocalStorage = (updatedPasswords, activeKey = masterPin) => {
     if (!activeKey) return;
     try {
@@ -178,7 +266,12 @@ export default function App() {
         JSON.stringify(updatedPasswords), 
         activeKey
       ).toString();
+      
+      // Save locally
       localStorage.setItem('lockpass_encrypted_data', encryptedData);
+      
+      // Save to Supabase
+      saveToCloud('lockpass_encrypted_data', encryptedData);
     } catch (error) {
       showToast('error', 'Gagal mengenkripsi dan menyimpan data vault.');
     }
@@ -206,7 +299,7 @@ export default function App() {
   };
 
   // Setup PIN (First run / Resetting)
-  const handleSetupPin = (e) => {
+  const handleSetupPin = async (e) => {
     e.preventDefault();
     if (!/^[0-9]{6}$/.test(setupPin)) {
       showToast('error', 'PIN harus terdiri dari 6 digit angka.');
@@ -259,6 +352,21 @@ export default function App() {
       
       localStorage.setItem('lockpass_encrypted_data', encryptedData);
       setPasswords(seedData);
+
+      // Sync both verify token and seed data to Supabase
+      if (supabase) {
+        setCloudSyncStatus('syncing');
+        const { error } = await supabase.from('lockpass_store').upsert([
+          { key: 'lockpass_verify', value: verifyToken },
+          { key: 'lockpass_encrypted_data', value: encryptedData }
+        ]);
+        if (error) {
+          setCloudSyncStatus('error');
+          showToast('warning', 'Gagal membackup setup ke database cloud.');
+        } else {
+          setCloudSyncStatus('synced');
+        }
+      }
       
       setSetupPin('');
       setConfirmSetupPin('');
@@ -344,17 +452,40 @@ export default function App() {
     showToast('info', 'Brankas telah dikunci kembali.');
   };
 
-  // Reset entire vault - Requires current PIN & text confirmation
-  const handleResetVault = () => {
+  // Reset entire vault - Clears Local Storage & Cloud Database
+  const handleResetVault = async () => {
     const confirmPin = window.prompt("Peringatan Kritis: Anda akan menghapus seluruh data password secara permanen.\n\nUntuk melanjutkan, masukkan PIN Brankas saat ini:");
     if (confirmPin === null) return;
     
     if (confirmPin === masterPin) {
       const confirmPhrase = window.prompt('Ketik "HAPUS PERMANEN" (huruf besar) untuk menghapus brankas:');
       if (confirmPhrase === "HAPUS PERMANEN") {
+        // Clear locally
         localStorage.removeItem('lockpass_verify');
         localStorage.removeItem('lockpass_encrypted_data');
         localStorage.removeItem('lockpass_lockout_until');
+        
+        // Clear from Supabase cloud
+        if (supabase) {
+          setCloudSyncStatus('syncing');
+          try {
+            const { error } = await supabase
+              .from('lockpass_store')
+              .delete()
+              .in('key', ['lockpass_verify', 'lockpass_encrypted_data']);
+            
+            if (error) {
+              console.error("Cloud delete error:", error);
+              setCloudSyncStatus('error');
+              showToast('warning', 'Data lokal terhapus, tetapi gagal menghapus data cloud.');
+            } else {
+              setCloudSyncStatus('synced');
+            }
+          } catch (err) {
+            setCloudSyncStatus('error');
+          }
+        }
+
         setPasswords([]);
         setMasterPin('');
         setHasMasterPinSet(false);
@@ -578,7 +709,7 @@ export default function App() {
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       try {
         const importedJson = JSON.parse(event.target.result);
         
@@ -588,9 +719,25 @@ export default function App() {
         }
 
         if (window.confirm("Mengimpor data baru akan menimpa seluruh data password saat ini. Apakah Anda yakin?")) {
+          // Update local storage
           localStorage.setItem('lockpass_verify', importedJson.verify);
           localStorage.setItem('lockpass_encrypted_data', importedJson.vault);
           
+          // Update cloud storage if configured
+          if (supabase) {
+            setCloudSyncStatus('syncing');
+            const { error } = await supabase.from('lockpass_store').upsert([
+              { key: 'lockpass_verify', value: importedJson.verify },
+              { key: 'lockpass_encrypted_data', value: importedJson.vault }
+            ]);
+            if (error) {
+              setCloudSyncStatus('error');
+              showToast('warning', 'Data lokal berhasil dimuat, tetapi gagal membackup ke database cloud.');
+            } else {
+              setCloudSyncStatus('synced');
+            }
+          }
+
           setHasMasterPinSet(true);
           setIsLocked(true);
           setMasterPin('');
@@ -743,7 +890,7 @@ export default function App() {
       {isLocked ? (
         <div className="lock-container">
           {!hasMasterPinSet ? (
-            /* SETUP NEW PIN (DISPLAYED ON FIRST RUN) */
+            /* SETUP NEW PIN */
             <div className="lock-card animate-scale">
               <div className="lock-logo-wrapper">
                 <Shield size={32} />
@@ -935,10 +1082,33 @@ export default function App() {
             </nav>
 
             <div className="sidebar-footer">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '0 8px' }}>
-                <div style={{ width: '8px', height: '8px', background: 'var(--accent-emerald)', borderRadius: '50%', boxShadow: '0 0 8px var(--accent-emerald)' }}></div>
-                <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Enkripsi AES-256 Aktif</span>
+              {/* Cloud Sync Status */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', padding: '0 8px', marginBottom: '8px', borderBottom: '1px solid var(--border-light)', paddingBottom: '10px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <div style={{ 
+                    width: '8px', 
+                    height: '8px', 
+                    background: cloudSyncStatus === 'synced' ? 'var(--accent-emerald)' : cloudSyncStatus === 'syncing' ? 'var(--accent-amber)' : cloudSyncStatus === 'checking' ? 'var(--accent-amber)' : cloudSyncStatus === 'error' ? 'var(--accent-rose)' : 'var(--text-muted)', 
+                    borderRadius: '50%', 
+                    boxShadow: cloudSyncStatus === 'synced' ? '0 0 8px var(--accent-emerald)' : cloudSyncStatus === 'error' ? '0 0 8px var(--accent-rose)' : 'none'
+                  }}></div>
+                  <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+                    Cloud Sync: {
+                      cloudSyncStatus === 'synced' ? 'Tersinkronisasi ☁' :
+                      cloudSyncStatus === 'syncing' ? 'Mengunggah... 🔄' :
+                      cloudSyncStatus === 'checking' ? 'Memeriksa... 🔄' :
+                      cloudSyncStatus === 'error' ? 'Koneksi Gagal ⚠️' :
+                      'Mode Offline (Lokal)'
+                    }
+                  </span>
+                </div>
               </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '0 8px', marginBottom: '8px' }}>
+                <div style={{ width: '8px', height: '8px', background: 'var(--accent-emerald)', borderRadius: '50%', boxShadow: '0 0 8px var(--accent-emerald)' }}></div>
+                <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Enkripsi AES-256 Aktif</span>
+              </div>
+              
               <button onClick={handleLockVault} className="btn btn-secondary" style={{ width: '100%' }}>
                 <LogOut size={16} /> Kunci Vault
               </button>
