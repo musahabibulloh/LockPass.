@@ -1014,6 +1014,49 @@ export default function App() {
                       );
                     })}
                   </div>
+
+                  {/* High-tech Numeric Keypad */}
+                  <div className="pin-keypad">
+                    {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
+                      <button 
+                        key={num} 
+                        type="button" 
+                        className="keypad-btn" 
+                        onClick={() => {
+                          if (typedPin.length < 6) {
+                            setTypedPin(prev => prev + num);
+                          }
+                        }}
+                      >
+                        {num}
+                      </button>
+                    ))}
+                    <button 
+                      type="button" 
+                      className="keypad-btn keypad-action"
+                      onClick={() => setTypedPin('')}
+                    >
+                      Batal
+                    </button>
+                    <button 
+                      type="button" 
+                      className="keypad-btn" 
+                      onClick={() => {
+                        if (typedPin.length < 6) {
+                          setTypedPin(prev => prev + '0');
+                        }
+                      }}
+                    >
+                      0
+                    </button>
+                    <button 
+                      type="button" 
+                      className="keypad-btn keypad-action"
+                      onClick={() => setTypedPin(prev => prev.slice(0, -1))}
+                    >
+                      ⌫
+                    </button>
+                  </div>
                 </div>
               )}
 
