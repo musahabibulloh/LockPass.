@@ -1114,55 +1114,228 @@ input:checked + .slider:before {
 }
 
 /* Responsive queries */
-@media (max-width: 1024px) {
-  .app-container {
-    flex-direction: column;
+@media (max-width: 768px) {
+  .app-layout {
+    display: block;
   }
+  
+  .app-container {
+    display: block;
+    padding-top: 60px; /* space for top header */
+    padding-bottom: 74px; /* space for bottom nav */
+  }
+
   .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
     width: 100%;
-    height: auto;
-    position: static;
+    height: 60px;
+    background: rgba(19, 28, 49, 0.95);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
     border-right: none;
     border-bottom: 1px solid var(--border-light);
-    padding: 16px 24px;
-  }
-  .sidebar-brand {
-    margin-bottom: 16px;
-  }
-  .sidebar-nav {
+    padding: 0 16px;
     flex-direction: row;
-    overflow-x: auto;
-    padding-bottom: 8px;
+    align-items: center;
+    justify-content: space-between;
+    z-index: 99;
+    height: 60px;
   }
+
+  .sidebar-brand {
+    margin-bottom: 0;
+    font-size: 18px;
+    gap: 8px;
+  }
+
+  /* Sticky Bottom Navigation Bar */
+  .sidebar-nav {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 68px;
+    background: rgba(11, 15, 25, 0.96);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-top: 1px solid var(--border-light);
+    flex-direction: row;
+    justify-content: space-around;
+    align-items: center;
+    padding: 0 6px;
+    margin: 0;
+    z-index: 99;
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.4);
+  }
+
+  .nav-item {
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding: 6px 0;
+    font-size: 10px;
+    height: 100%;
+    flex: 1;
+    text-align: center;
+    background: transparent !important;
+    border: none;
+  }
+
+  .nav-item span {
+    font-size: 9px;
+    font-weight: 500;
+  }
+
+  .nav-item svg {
+    width: 20px;
+    height: 20px;
+  }
+
   .nav-item.active {
     border-left: none;
-    border-bottom: 3px solid var(--primary);
-    border-radius: var(--radius-md) var(--radius-md) 0 0;
-    padding: 12px 16px;
+    border-top: 3px solid var(--primary);
+    border-radius: 0;
+    padding-left: 0;
+    padding-top: 3px;
+    color: #a5b4fc;
   }
-  .sidebar-footer {
-    display: none; /* Hide standard sidebar footer, we can put lock inside nav or header */
-  }
-  .main-content {
-    padding: 24px;
-  }
-  .stats-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
 
-@media (max-width: 640px) {
-  .stats-grid {
-    grid-template-columns: 1fr;
+  /* Top Right Action Area in Mobile Header */
+  .sidebar-footer {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: none;
+    flex-direction: row;
+    align-items: center;
+    gap: 12px;
   }
+
+  .sidebar-footer .btn-secondary {
+    width: 36px !important;
+    height: 36px !important;
+    padding: 0 !important;
+    border-radius: var(--radius-md);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(244, 63, 94, 0.1) !important;
+    border-color: rgba(244, 63, 94, 0.2) !important;
+    color: #fda4af !important;
+  }
+
+  .sidebar-footer .btn-secondary:hover {
+    background: rgba(244, 63, 94, 0.2) !important;
+  }
+
+  .sidebar-footer .btn-secondary span {
+    display: none; /* Hide "Kunci Vault" text, keep only logout icon */
+  }
+
+  /* Hide AES key text on mobile sidebar */
+  .sidebar-footer div:nth-child(2) {
+    display: none !important;
+  }
+
+  /* Style Cloud status dot in top header */
+  .sidebar-footer div:first-child {
+    margin-bottom: 0 !important;
+    border-bottom: none !important;
+    padding-bottom: 0 !important;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+  }
+
+  .sidebar-footer div:first-child span {
+    display: none; /* Hide label text to save header space, keep only status dot */
+  }
+
+  .main-content {
+    padding: 16px;
+  }
+
+  .main-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+
+  .page-title-group h1 {
+    font-size: 22px;
+  }
+
+  .header-actions {
+    width: 100%;
+  }
+
+  .header-actions button {
+    width: 100%; /* Make add button full width on mobile */
+  }
+
+  /* Dynamic 2x2 Stats Grid for Mobile */
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 10px !important;
+    margin-bottom: 20px;
+  }
+
+  .stat-card {
+    padding: 12px 14px !important;
+    gap: 10px !important;
+    border-radius: var(--radius-md);
+  }
+
+  .stat-icon {
+    width: 36px !important;
+    height: 36px !important;
+  }
+
+  .stat-icon svg {
+    width: 16px !important;
+    height: 16px !important;
+  }
+
+  .stat-value {
+    font-size: 18px !important;
+  }
+
+  .stat-label {
+    font-size: 11px !important;
+  }
+
+  .control-panel {
+    padding: 14px !important;
+    margin-bottom: 16px;
+  }
+
   .search-filter-row {
     flex-direction: column;
     align-items: stretch;
+    gap: 10px;
   }
+
+  .category-scroll {
+    padding-bottom: 2px;
+  }
+
+  .category-pill {
+    padding: 6px 12px;
+    font-size: 12px;
+  }
+
   .backup-zone {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr !important;
+    gap: 12px;
+  }
+
+  .backup-card {
+    padding: 16px !important;
   }
 }
+
 
 /* PIN Input Styling */
 .pin-input-container {
